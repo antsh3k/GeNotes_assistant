@@ -1,0 +1,57 @@
+# Core
+fastapi
+uvicorn[standard]
+python-dotenv
+python-multipart
+
+# Data Validation & Settings
+pydantic
+pydantic-settings
+
+# HTTP Clients
+requests
+httpx
+aiohttp
+
+# LLM & Vector DB
+langchain
+langchain-community
+langchain-core
+langchain-openai
+langchain-chroma
+langchain-ollama
+langchain-text-splitters
+chromadb
+sentence-transformers
+tiktoken
+
+# Document Processing
+beautifulsoup4
+lxml
+pdfminer-six
+unstructured
+openpyxl
+pillow
+python-pptx
+python-magic
+python-slugify
+pyyaml
+pandas
+
+# Authentication
+python-jose[cryptography]
+numpy
+
+# Logging
+structlog
+loguru
+
+# Development (not needed in production)
+pytest
+pytest-asyncio
+pytest-cov
+black
+isort
+mypy
+flake8
+pre-commit

@@ -1,0 +1,85 @@
+# Build stage
+FROM python:3.11.9-slim-bookworm AS builder
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --prefer-binary -r requirements.txt
+
+# Final stage
+FROM python:3.11.9-slim-bookworm
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/root/.local/bin:$PATH" \
+    # UID for the non-root user
+    APP_UID=1001 \
+    APP_GID=1001 \
+    APP_USER=appuser \
+    APP_HOME=/app
+
+# Create non-root user and set up directories
+RUN groupadd -g "${APP_GID}" "${APP_USER}" \
+    && useradd --create-home --no-log-init -u "${APP_UID}" -g "${APP_GID}" "${APP_USER}" \
+    && mkdir -p "${APP_HOME}" \
+    && chown -R "${APP_USER}:${APP_GID}" "${APP_HOME}"
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    libmagic1 \
+    tesseract-ocr \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory and switch to non-root user
+WORKDIR ${APP_HOME}
+
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Switch to non-root user
+USER ${APP_USER}
+
+# Ensure the local bin directory is in PATH
+ENV PATH="/home/${APP_USER}/.local/bin:${PATH}"
+
+# Copy application code
+COPY --chown=${APP_USER}:${APP_GID} simple_streamlitt_app/ ${APP_HOME}/
+
+# Create necessary directories and set permissions
+RUN mkdir -p ${APP_HOME}/data \
+    && chown -R ${APP_USER}:${APP_GID} ${APP_HOME}/data
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose the port the app runs on
+EXPOSE 8000
+
+# Command to run the application
+CMD ["uvicorn", "3_chatbot:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
