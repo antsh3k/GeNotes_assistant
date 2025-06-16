@@ -6,17 +6,29 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.68.0-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Ollama](https://img.shields.io/badge/Ollama-0.5.4-7C3AED?logo=ollama)](https://ollama.ai/)
 
-Quick, concise information to help healthcare professionals make the right genomic decisions at each stage of a clinical pathway.
+An offline-ready, modular RAG (Retrieval-Augmented Generation) platform that enables clinicians to interact with a local GeNotes database using open-source LLMs (Mistral or LLaMA). Built with FastAPI, React.js, and LLAMAIndex, and deployable in local or cloud environments.
 
-> **Note**: This is a containerized application using FastAPI for the backend and Nginx for reverse proxy. It integrates with Ollama for local LLM processing and ChromaDB for vector storage.
+## What is GeNotes?
+
+__Genomic notes for clinicians__
+
+Quick, concise information to help healthcare professionals make the right genomic decisions at each stage of a clinical pathway.
+[GeNotes Website](https://www.genomicseducation.hee.nhs.uk/genotes/)
+
+GeNotes aims to improve the accessibility and usability of genomic clinical guidelines for clinicians. This chatbot allows healthcare professionals to efficiently retrieve relevant genomic clinical guidelines from GeNotes' dataset.
+
+## Demo
+
+[Live Demo](ui_prototype.html)
 
 ## Features
 
 - **Interactive Chat Interface**: Natural language interface for querying genomic guidelines
 - **Document Management**: Upload and manage clinical documents and guidelines
-- **Local LLM Processing**: Uses Ollama for privacy-focused local language model processing
+- **Local LLM Processing**: Uses Ollama for privacy-focused local language model processing (Mistral/LLaMA)
 - **Vector Store Integration**: ChromaDB for efficient storage and retrieval of genomic knowledge
-- **Containerized Architecture**: Easy deployment with Docker and Docker Compose
+- **RAG Architecture**: Retrieval-Augmented Generation for accurate, context-aware responses
+- **Containerized Deployment**: Easy setup with Docker and Docker Compose
 - **WebSocket Support**: Real-time chat capabilities
 - **Session Management**: In-memory session handling for chat conversations
 
@@ -29,21 +41,29 @@ Quick, concise information to help healthcare professionals make the right genom
 - Ollama installed locally (for local LLM processing)
 - Python 3.11+ (for development)
 
-## Quick Start
+## 🚀 Quick Start
 
-1. **Clone the repository**
+1. **Clone the Repository**
    ```bash
    git clone https://github.com/yourusername/GeNotes_assistant.git
    cd GeNotes_assistant
    ```
 
-2. **Set up environment variables**
+2. **Prepare Environment**
+   Copy the .env.example and edit as needed:
    ```bash
    cp .env.example .env
-   # Edit .env file with your configuration if needed
+   # Edit .env file with your configuration
    ```
 
-3. **Build and start the application**
+3. **Preprocess Data**
+   ```bash
+   # Preprocess CSV to index
+   docker run --rm -v $(pwd):/app -w /app/backend/scripts python:3.10 \
+   bash -c "pip install -r ../requirements.txt && python preprocess.py"
+   ```
+
+4. **Build and Start**
    ```bash
    docker-compose up --build -d
    ```
@@ -192,24 +212,30 @@ docker-compose up -d
    npm start
    ```
 
-## Project Structure
+## 📁 Repository Structure
 
 ```
 GeNotes_assistant/
-├── nginx/                    # Nginx reverse proxy configuration
-│   └── conf.d/              # Nginx server configurations
-│       └── default.conf     # Main Nginx configuration
-├── backend/                 # FastAPI backend application
-│   ├── 3_chatbot.py        # Main FastAPI application
-│   └── 2_chunking_embedding_ingestion.py  # Document processing
-├── .dockerignore            # Files to ignore in Docker builds
-├── .env.example             # Example environment variables
-├── docker-compose.yml       # Docker Compose configuration
-├── Dockerfile.backend       # Backend Dockerfile
-├── Dockerfile.nginx         # Nginx Dockerfile
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
+├── backend/         # FastAPI backend + RAG logic
+├── frontend/        # React-based chatbot UI
+├── nginx/           # Nginx reverse proxy configuration
+│   └── conf.d/      # Nginx server configurations
+├── data/            # GeNotes CSV and processed data
+├── scripts/         # Preprocessing and DB setup scripts
+├── docs/            # Deployment & architecture notes
+└── docker-compose.yml
 ```
+
+## 🛠 Technologies
+
+| Layer         | Technology                     |
+|--------------|--------------------------------|
+| Frontend     | React.js, TypeScript           |
+| Backend      | FastAPI, LLAMAIndex, LangChain |
+| LLM          | Mistral / LLaMA (local)        |
+| Vector Store | ChromaDB                       |
+| Deployment   | Docker, Docker Compose         |
+
 
 ## Environment Variables
 
@@ -309,10 +335,6 @@ docker-compose exec backend /bin/bash
    docker-compose -f docker-compose.prod.yml up --build -d
    ```
 
-### Kubernetes (Optional)
-
-For production deployments, you can use the provided Kubernetes manifests in the `k8s/` directory.
-
 ## Troubleshooting
 
 ### Common Issues
@@ -337,13 +359,6 @@ For production deployments, you can use the provided Kubernetes manifests in the
    - Clear the vector store directory if needed: `rm -rf data/chromadb/*`
    - Rebuild the vector store after clearing data
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
 
 ## License
 
