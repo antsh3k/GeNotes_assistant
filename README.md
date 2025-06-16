@@ -125,6 +125,11 @@ If the `download_models.sh` script fails:
    ```
 4. Try downloading models manually using the commands in the "Managing Models" section
 
+5. Directly check which models have been downloaded:
+   ```bash
+   docker exec genotes-ollama ollama list
+   ```
+
 ### Disk Space
 Models can take up significant disk space (several GB each). To check disk usage:
 
