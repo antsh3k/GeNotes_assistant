@@ -1,6 +1,7 @@
 """
 Embedding and vector store functionality.
 """
+import os
 import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -40,8 +41,12 @@ class VectorStore:
             # Create parent directories if they don't exist
             self.persist_directory.mkdir(parents=True, exist_ok=True)
             
-            # Initialize embeddings
-            embeddings = OllamaEmbeddings(model=self.embedding_model)
+            # Initialize embeddings with base_url from environment
+            base_url = os.getenv("OLLAMA_API_BASE_URL", "http://localhost:11434")
+            embeddings = OllamaEmbeddings(
+                model=self.embedding_model,
+                base_url=base_url
+            )
             
             # Initialize Chroma
             return Chroma(
@@ -58,24 +63,33 @@ class VectorStore:
         Add documents to the vector store.
         
         Args:
-            documents: List of documents to add
+            documents: List of documents to add, each with 'page_content' and 'metadata'
             
         Returns:
             List of document IDs
         """
+        if not documents:
+            return []
+            
         try:
-            # Extract texts and metadata
-            texts = [doc.get("content", "") for doc in documents]
-            metadatas = [
-                {k: v for k, v in doc.items() if k != "content"} 
-                for doc in documents
-            ]
+            # Extract texts and metadatas
+            texts = [doc['page_content'] for doc in documents]
+            metadatas = [doc['metadata'] for doc in documents]
             
             # Add to Chroma
-            return self.client.add_texts(
+            ids = self.client.add_texts(
                 texts=texts,
                 metadatas=metadatas
             )
+            
+            # Persist the data by reinitializing the client with the same collection
+            # This ensures the data is written to disk
+            self._client = None
+            self.client
+            
+            logger.info(f"Added {len(ids)} documents to vector store")
+            return ids
+            
         except Exception as e:
             logger.error(f"Error adding documents to vector store: {str(e)}")
             raise

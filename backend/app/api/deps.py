@@ -65,12 +65,11 @@ def get_tools(vector_store) -> List[Tool]:
     
     return tools
 
-# Initialize chat manager with tools
+# Initialize chat manager with RAG capabilities
 chat_manager = ChatManager(
     model_name=CHAT_MODEL,
-    model_provider=MODEL_PROVIDER,
-    vector_store=vector_store.client,
-    tools=get_tools(vector_store)
+    embedding_model=EMBEDDING_MODEL,
+    vector_store=vector_store
 )
 
 def get_vector_store() -> VectorStore:

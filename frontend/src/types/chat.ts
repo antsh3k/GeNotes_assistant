@@ -5,7 +5,7 @@ export interface MessageSource {
 
 export interface Message {
   id: number;
-  text: string;
+  content: string;
   role: 'user' | 'assistant' | 'system';
   timestamp: string;
   sources?: MessageSource[];

@@ -1,8 +1,9 @@
 """
-Chat endpoints.
+Chat endpoints for the GeNotes Assistant API.
 """
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+import re
 from typing import List, Dict, Any, Optional
 
 from app.core.chat import ChatManager
@@ -28,25 +29,42 @@ async def chat(
     chat_manager: ChatManager = Depends(get_chat_manager)
 ) -> ChatResponse:
     """
-    Handle chat messages and return responses.
+    Handle chat messages and return responses using RAG.
     
     Args:
         chat_request: The chat request containing the message and history
-        chat_manager: The chat manager instance
+        chat_manager: The chat manager instance with RAG capabilities
         
     Returns:
-        ChatResponse containing the assistant's response
+        ChatResponse containing the assistant's response and sources
     """
     try:
-        # Generate response using the chat manager
+        # Generate response using ChatManager
         response = chat_manager.generate_response(
             query=chat_request.message,
-            chat_history=[msg.dict() for msg in chat_request.history]
+            chat_history=chat_request.history
         )
         
+        # Extract sources from the response content
+        sources = []
+        if "sources" in response:
+            sources = response["sources"]
+        
+        # Extract sources from the response text if not already in sources
+        response_text = response.get("response", "")
+        if "Source:" in response_text and not sources:
+            # Extract all source URLs from the response
+            source_matches = re.findall(r'Source: (https?://[^\s]+)', response_text)
+            if source_matches:
+                sources = list(set(source_matches))  # Remove duplicates
+        
+        # Clean up the response text by removing source lines
+        cleaned_response = re.sub(r'Source: .+\n?', '', response_text).strip()
+        
+        # Return the response with sources
         return ChatResponse(
-            response=response["response"],
-            sources=response.get("sources", []),
+            response=cleaned_response,
+            sources=sources,
             metadata=response.get("metadata", {})
         )
         
@@ -54,7 +72,7 @@ async def chat(
         logger.error(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing your request"
+            detail=str(e)
         )
 
 @router.post("/chat/session", response_model=ChatSessionResponse)

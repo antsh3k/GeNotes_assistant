@@ -1,0 +1,8 @@
+brca1-and-brca2
+breast-cancer
+brugada-syndrome
+carbamazepine
+manchester-evans-score
+palb2
+autosomal-dominant-inheritance
+direct-to-consumer-constitutional-germline-genomic-testing

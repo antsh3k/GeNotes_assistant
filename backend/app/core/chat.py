@@ -1,68 +1,63 @@
 """
-Chat and LLM functionality.
+Chat and LLM functionality using RAG with Chroma and Ollama.
 """
 import logging
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from langchain.agents import AgentExecutor, Tool, AgentType, initialize_agent
-from langchain_community.chat_models import ChatOllama
+from langchain.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder, HumanMessagePromptTemplate, SystemMessagePromptTemplate
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_community.embeddings import OllamaEmbeddings
-from langchain_core.messages import AIMessage, HumanMessage, BaseMessage, SystemMessage
+from langchain_community.vectorstores import Chroma
+from langchain_community.chat_models import ChatOllama
 from langchain.memory import ConversationBufferMemory
-from langchain.prompts import (
-    MessagesPlaceholder, 
-    HumanMessagePromptTemplate, 
-    ChatPromptTemplate,
-    SystemMessagePromptTemplate
-)
-from langchain.schema import Document
-from langchain.vectorstores import Chroma
-from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 class ChatManager:
-    """Manages chat interactions with the LLM."""
+    """Manages chat interactions with the LLM using RAG."""
     
-    def __init__(self, model_name: str, model_provider: str, tools: Optional[list] = None, vector_store: Any = None):
+    def __init__(self, model_name: str, embedding_model: str, vector_store: Any = None):
         """
-        Initialize the chat manager.
+        Initialize the chat manager with RAG capabilities.
         
         Args:
             model_name: Name of the LLM to use
-            model_provider: Provider of the LLM (e.g., 'ollama', 'openai')
-            tools: List of tools the agent can use
+            embedding_model: Name of the embedding model to use
             vector_store: Vector store for document retrieval
         """
         self.model_name = model_name
-        self.model_provider = model_provider
+        self.embedding_model = embedding_model
         self.vector_store = vector_store
-        self.tools = tools or []
         self.llm = self._init_llm()
+        self.embeddings = self._init_embeddings()
         self.agent = self._init_agent()
-        
-        # Initialize chat history with a welcome message
-        self.chat_history = [
-            AIMessage(content="Hello, I'm the GeNotes Assistant. I can help you find and understand genomic clinical guidelines. How can I assist you today?")
-        ]
     
     def _init_llm(self):
         """Initialize the language model."""
         try:
-            if self.model_provider.lower() == "ollama":
-                return ChatOllama(
-                    model=self.model_name,
-                    base_url=os.getenv("OLLAMA_API_BASE_URL", "http://ollama:11434"),
-                    temperature=0.1
-                )
-            else:
-                raise ValueError(f"Unsupported model provider: {self.model_provider}")
+            return ChatOllama(
+                model=self.model_name,
+                base_url=os.getenv("OLLAMA_API_BASE_URL", "http://ollama:11434"),
+                temperature=0
+            )
         except Exception as e:
             logger.error(f"Error initializing language model: {str(e)}")
             raise
     
+    def _init_embeddings(self):
+        """Initialize the embedding model."""
+        try:
+            return OllamaEmbeddings(
+                model=self.embedding_model,
+                base_url=os.getenv("OLLAMA_API_BASE_URL", "http://ollama:11434")
+            )
+        except Exception as e:
+            logger.error(f"Error initializing embeddings: {str(e)}")
+            raise
+    
     def _init_agent(self) -> AgentExecutor:
-        """Initialize the agent with tools."""
+        """Initialize the agent with RAG capabilities."""
         try:
             # Define the system message
             system_message = """You are a helpful assistant that helps answer questions about genomic guidelines.
@@ -71,12 +66,89 @@ class ChatManager:
             If you don't know the answer, just say that you don't know, don't try to make up an answer.
             """
 
+            # Create the retrieval tool
+            def retrieve_docs(query: str) -> str:
+                """
+                Retrieve information related to a query from the vector store.
+                
+                Args:
+                    query: The search query
+                    
+                Returns:
+                    A string containing the retrieved information with sources
+                """
+                try:
+                    # Get documents from the vector store
+                    retrieved_docs = self.vector_store.similarity_search(query, k=3)
+                    
+                    if not retrieved_docs:
+                        return "No relevant information found in the knowledge base."
+                    
+                    # Format the results
+                    results = []
+                    seen_sources = set()
+                    
+                    for doc in retrieved_docs:
+                        try:
+                            # Handle both Document objects and dictionaries
+                            if hasattr(doc, 'metadata'):
+                                # Document object
+                                metadata = getattr(doc, 'metadata', {})
+                                source = metadata.get('source', 'Unknown source')
+                                title = metadata.get('title', 'No title')
+                                content = getattr(doc, 'page_content', '')
+                            else:
+                                # Dictionary format
+                                metadata = doc.get('metadata', {})
+                                source = metadata.get('source', 'Unknown source')
+                                title = metadata.get('title', 'No title')
+                                content = doc.get('page_content', doc.get('content', ''))
+                            
+                            # Skip if we've already seen this source
+                            if source in seen_sources:
+                                continue
+                                
+                            seen_sources.add(source)
+                            
+                            # Clean and add to results
+                            if content and str(content).strip():
+                                result = [
+                                    f"URL: {source}",
+                                    f"Title: {title}",
+                                    f"Content: {content.strip()}",
+                                    ""  # Empty line between documents
+                                ]
+                                results.append("\n".join(result).strip())
+                                
+                        except Exception as e:
+                            logger.warning(f"Error processing document: {str(e)}")
+                            continue
+                    
+                    if not results:
+                        return "No relevant information could be extracted from the documents."
+                        
+                    # Join all results with double newlines for better readability
+                    return "\n\n".join(results)
+                    
+                except Exception as e:
+                    error_msg = f"Error retrieving information: {str(e)}"
+                    logger.error(error_msg)
+                    return error_msg
+            
+            # Create the tool
+            tools = [
+                Tool(
+                    name="retrieve",
+                    func=retrieve_docs,
+                    description="Retrieve information from the knowledge base. Input should be a search query."
+                )
+            ]
+            
             # Create prompt template
             prompt = ChatPromptTemplate.from_messages([
-                SystemMessagePromptTemplate.from_template(system_message),
-                MessagesPlaceholder(variable_name="chat_history"),
-                HumanMessagePromptTemplate.from_template("{input}"),
-                MessagesPlaceholder(variable_name="agent_scratchpad")
+                ("system", system_message),
+                ("human", "{input}"),
+                MessagesPlaceholder(variable_name="agent_scratchpad"),
             ])
             
             # Initialize memory
@@ -88,7 +160,7 @@ class ChatManager:
             
             # Initialize agent
             agent = initialize_agent(
-                tools=self.tools,
+                tools=tools,
                 llm=self.llm,
                 agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
                 verbose=True,
@@ -103,123 +175,95 @@ class ChatManager:
             )
             
             return agent
+            
         except Exception as e:
             logger.error(f"Error initializing agent: {str(e)}")
             raise
     
-    def format_chat_history(self, messages: List[Dict[str, str]]) -> List[BaseMessage]:
-        """
-        Convert message history to LangChain message format.
-        
-        Args:
-            messages: List of messages in format [{"role": "user", "content": "..."}, ...]
-            
-        Returns:
-            List of LangChain message objects
-        """
-        formatted_messages = []
-        for msg in messages:
-            role = msg.get("role", "").lower()
-            content = msg.get("content", "")
-            
-            if role == "user":
-                formatted_messages.append(HumanMessage(content=content))
-            elif role == "assistant":
-                formatted_messages.append(AIMessage(content=content))
-        
-        return formatted_messages
-    
-    def retrieve_documents(self, query: str, k: int = 3) -> List[Document]:
-        """
-        Retrieve relevant documents from the vector store.
-        
-        Args:
-            query: The search query
-            k: Number of documents to retrieve
-            
-        Returns:
-            List of relevant documents
-        """
-        if not self.vector_store:
-            return []
-            
-        try:
-            docs = self.vector_store.similarity_search(query, k=k)
-            return docs
-        except Exception as e:
-            logger.error(f"Error retrieving documents: {str(e)}")
-            return []
-    
     def generate_response(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
         """
-        Generate a response to a user query.
+        Generate a response to a user query using RAG.
         
         Args:
             query: The user's query
             chat_history: List of previous messages in the conversation
             
         Returns:
-            Dictionary containing the response, sources, and metadata
+            Dictionary containing the response and sources
         """
         try:
-            # Format chat history
-            formatted_history = self.format_chat_history(chat_history or [])
-            
-            # Retrieve relevant documents
-            docs = self.retrieve_documents(query)
-            
-            # Add context from documents if available
-            context = "\n\n".join([doc.page_content for doc in docs])
-            
-            # Prepare the input with context
-            if context:
-                query_with_context = f"Context: {context}\n\nQuestion: {query}"
-            else:
-                query_with_context = query
-            
-            # Add current query to history
-            current_message = HumanMessage(content=query)
+            # Format chat history for the agent
+            formatted_history = []
+            if chat_history:
+                for msg in chat_history:
+                    try:
+                        if hasattr(msg, 'role') and hasattr(msg, 'content'):
+                            # Handle Message object
+                            role = getattr(msg, 'role', '').lower()
+                            content = getattr(msg, 'content', '')
+                        else:
+                            # Handle dictionary
+                            role = msg.get('role', '').lower() if hasattr(msg, 'get') else ''
+                            content = msg.get('content', '') if hasattr(msg, 'get') else str(msg)
+                        
+                        if role == "user":
+                            formatted_history.append(HumanMessage(content=content))
+                        elif role == "assistant":
+                            formatted_history.append(AIMessage(content=content))
+                    except Exception as e:
+                        logger.warning(f"Error formatting message: {str(e)}")
+                        continue
             
             # Run the agent
-            result = self.agent({
-                "input": query_with_context,
-                "chat_history": formatted_history
-            })
+            result = self.agent({"input": query, "chat_history": formatted_history})
             
-            # Extract sources from documents
-            sources = []
-            for i, doc in enumerate(docs, 1):
-                if hasattr(doc, 'metadata'):
-                    source = doc.metadata.get('source', f'Document {i}')
-                    sources.append({
-                        'source': source,
-                        'content': doc.page_content[:200] + '...'  # First 200 chars as preview
-                    })
+            # Extract sources from the intermediate steps
+            sources = set()
+            response_text = result.get("output", "I'm sorry, I couldn't generate a response.")
             
-            # Prepare response
-            response = {
-                "response": result.get("output", "I'm sorry, I couldn't generate a response."),
-                "sources": sources,
+            # Extract sources from the response text
+            if "Source:" in response_text:
+                # Extract all source lines
+                source_lines = [line for line in response_text.split('\n') if line.startswith('Source:')]
+                for line in source_lines:
+                    # Extract the source URL or identifier
+                    source = line.replace('Source:', '').strip()
+                    if source and source != 'Unknown source':
+                        sources.add(source)
+                
+                # Clean up the response text by removing source lines
+                cleaned_response = '\n'.join([
+                    line for line in response_text.split('\n') 
+                    if not line.startswith('Source:')
+                ]).strip()
+            else:
+                cleaned_response = response_text
+            
+            # Also check intermediate steps for additional sources
+            if "intermediate_steps" in result:
+                for step in result["intermediate_steps"]:
+                    if len(step) > 1 and hasattr(step[1], 'content'):
+                        content = step[1].content
+                        # Extract URLs from the content
+                        urls = re.findall(r'https?://[^\s\n]+', content)
+                        for url in urls:
+                            sources.add(url)
+            
+            return {
+                "response": cleaned_response,
+                "sources": list(sources),
                 "metadata": {
                     "model": self.model_name,
-                    "provider": self.model_provider,
-                    "context_used": bool(context)
+                    "embedding_model": self.embedding_model
                 }
             }
             
-            # Update chat history
-            self.chat_history.extend([current_message, AIMessage(content=response["response"])])
-            
-            return response
-            
         except Exception as e:
-            logger.error(f"Error generating response: {str(e)}")
+            logger.error(f"Error in generate_response: {str(e)}")
             return {
-                "response": "I'm sorry, I encountered an error processing your request.",
+                "response": "I apologize, but I encountered an error processing your request. Please try again later.",
                 "sources": [],
                 "metadata": {
-                    "error": str(e),
-                    "model": self.model_name,
-                    "provider": self.model_provider
+                    "error": str(e)
                 }
             }

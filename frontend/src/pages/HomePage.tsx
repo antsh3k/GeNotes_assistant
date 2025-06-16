@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
 import {
   Box,
   TextField,
@@ -83,7 +84,7 @@ const HomePage: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
-      text: "Hello, I'm the GeNotes Assistant. I can help you find and understand genomic clinical guidelines. How can I assist you today?",
+      content: "Hello, I'm the GeNotes Assistant. I can help you find and understand genomic clinical guidelines. How can I assist you today?",
       role: 'assistant',
       timestamp: new Date().toISOString(),
     },
@@ -106,7 +107,7 @@ const HomePage: React.FC = () => {
 
     const userMessage: Message = {
       id: Date.now(),
-      text: input,
+      content: input,
       role: 'user',
       timestamp: new Date().toISOString(),
     };
@@ -116,33 +117,45 @@ const HomePage: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // TODO: Replace with actual API call
-      // const response = await axios.post('/api/chat', { message: input });
-      // const botMessage: Message = {
-      //   id: Date.now() + 1,
-      //   text: response.data.response,
-      //   role: 'assistant',
-      //   timestamp: new Date().toISOString(),
-      //   sources: response.data.sources
-      // };
+      // Prepare the request payload with message and chat history
+      const payload = {
+        message: input,
+        history: messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }))
+      };
       
-      // Simulate API call
-      setTimeout(() => {
-        const botMessage: Message = {
-          id: Date.now() + 1,
-          text: "I'm your GeNotes assistant. How can I help you with genomic guidelines today?",
-          role: 'assistant',
-          timestamp: new Date().toISOString(),
-          sources: [
-            { title: 'NHS Genomic Medicine Service', url: '#' },
-            { title: 'Genomics England', url: '#' },
-          ],
-        };
-        setMessages((prev) => [...prev, botMessage]);
-        setIsLoading(false);
-      }, 1000);
+      const response = await axios.post('http://localhost:8000/api/chat', payload);
+      
+      // Convert string sources to MessageSource objects if needed
+      const sources = Array.isArray(response.data.sources) 
+        ? response.data.sources.map((source: string | { url: string, title: string }) => 
+            typeof source === 'string' 
+              ? { url: source, title: new URL(source).hostname } 
+              : source
+          )
+        : [];
+      
+      const botMessage: Message = {
+        id: Date.now() + 1,
+        content: response.data.response,
+        role: 'assistant',
+        timestamp: new Date().toISOString(),
+        sources: sources
+      };
+      
+      setMessages((prev) => [...prev, botMessage]);
     } catch (error) {
       console.error('Error sending message:', error);
+      const errorMessage: Message = {
+        id: Date.now() + 1,
+        content: 'Sorry, I encountered an error. Please try again.',
+        role: 'assistant',
+        timestamp: new Date().toISOString()
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -183,13 +196,34 @@ const HomePage: React.FC = () => {
                         fontSize: '14px'
                       }}
                     >
-                      {message.text}
+                      {message.content}
                     </Typography>
                     {message.sources && message.sources.length > 0 && (
                       <Box sx={{ mt: 2, pt: 1, borderTop: '1px solid rgba(255,255,255,0.3)' }}>
-                        <Typography variant="caption" sx={{ fontSize: '11px', opacity: 0.8 }}>
-                          Source: {message.sources[0].title}
+                        <Typography variant="caption" sx={{ fontSize: '11px', opacity: 0.8, display: 'block' }}>
+                          Sources:
                         </Typography>
+                        {message.sources.map((source, index) => (
+                          <Typography 
+                            key={index} 
+                            variant="caption" 
+                            sx={{ 
+                              fontSize: '11px', 
+                              opacity: 0.8, 
+                              display: 'block',
+                              '&:hover': { textDecoration: 'underline' },
+                              color: 'inherit',
+                              textDecoration: 'none',
+                              cursor: 'pointer'
+                            }}
+                            component="a"
+                            href={source.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {source.title || source.url}
+                          </Typography>
+                        ))}
                       </Box>
                     )}
                   </MessageBubble>
