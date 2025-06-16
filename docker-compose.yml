@@ -10,7 +10,7 @@ services:
     volumes:
       - ./data/chromadb:/app/data/chromadb
       - ./data/datasets:/app/data/datasets
-      - ./simple_streamlitt_app:/app/simple_streamlitt_app
+      - ./backend:/app/backend
     env_file:
       - .env
     environment:
@@ -24,7 +24,7 @@ services:
     depends_on:
       - ollama
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -86,13 +86,12 @@ services:
       - OLLAMA_HOST=0.0.0.0
     networks:
       - genotes-network
-    # Temporarily disabling healthcheck for debugging
-    # healthcheck:
-    #   test: ["CMD", "sh", "/healthcheck.sh"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 5
-    #   start_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
 volumes:
   ollama_data:

@@ -5,58 +5,93 @@ import {
   Button,
   Paper,
   Typography,
-  List,
-  ListItem,
-  ListItemText,
   CircularProgress,
-  Divider,
-  IconButton,
-  useTheme,
 } from '@mui/material';
-import SendIcon from '@mui/icons-material/Send';
 import { styled } from '@mui/material/styles';
 import { Message } from '../types/chat';
+
+const MainContainer = styled(Box)({
+  display: 'flex',
+  flexDirection: 'column',
+  backgroundColor: '#f5f5f5',
+  minHeight: 'calc(100vh - 100px)', // Adjust for app header
+  padding: '20px',
+});
+
+const ContentContainer = styled(Box)({
+  flex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  maxWidth: '1000px',
+  margin: '0 auto',
+  width: '100%',
+});
 
 const ChatContainer = styled(Paper)({
   display: 'flex',
   flexDirection: 'column',
-  height: 'calc(100vh - 200px)',
-  maxWidth: '1200px',
-  margin: '0 auto',
+  height: '600px',
   overflow: 'hidden',
+  borderRadius: '8px',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
 });
 
 const MessagesContainer = styled(Box)({
   flex: 1,
   overflowY: 'auto',
-  padding: '16px',
+  padding: '20px',
+  backgroundColor: 'white',
 });
 
 const InputContainer = styled(Box)({
   display: 'flex',
-  padding: '16px',
+  padding: '16px 20px',
   borderTop: '1px solid #e0e0e0',
-  backgroundColor: '#f5f5f5',
+  backgroundColor: 'white',
+  gap: '12px',
+  alignItems: 'flex-end',
 });
 
 const MessageBubble = styled(Box, {
   shouldForwardProp: (prop) => prop !== 'isUser',
 })<{ isUser: boolean }>(({ theme, isUser }) => ({
-  maxWidth: '70%',
-  padding: '8px 16px',
-  borderRadius: '18px',
-  marginBottom: '8px',
+  maxWidth: '80%',
+  padding: '12px 16px',
+  borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+  marginBottom: '12px',
   alignSelf: isUser ? 'flex-end' : 'flex-start',
-  backgroundColor: isUser ? theme.palette.primary.main : '#e9ecef',
-  color: isUser ? '#ffffff' : '#212529',
+  backgroundColor: isUser ? '#4db6e6' : '#e9ecef', // Light blue for user messages
+  color: isUser ? '#ffffff' : '#333333',
+  marginLeft: isUser ? 'auto' : '0',
+  marginRight: isUser ? '0' : 'auto',
 }));
 
+const SendButton = styled(Button)({
+  backgroundColor: '#4caf50', // Green send button
+  color: 'white',
+  minWidth: '80px',
+  height: '40px',
+  '&:hover': {
+    backgroundColor: '#45a049',
+  },
+  '&:disabled': {
+    backgroundColor: '#cccccc',
+  },
+});
+
 const HomePage: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 1,
+      text: "Hello, I'm the GeNotes Assistant. I can help you find and understand genomic clinical guidelines. How can I assist you today?",
+      role: 'assistant',
+      timestamp: new Date().toISOString(),
+    },
+  ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const theme = useTheme();
+
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -120,74 +155,85 @@ const HomePage: React.FC = () => {
   };
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Typography variant="h4" gutterBottom>
-        Genomic Guidelines Assistant
-      </Typography>
-      
-      <ChatContainer elevation={3}>
-        <MessagesContainer>
-          <List>
-            {messages.map((message) => (
-              <React.Fragment key={message.id}>
-                <ListItem sx={{ px: 0, py: 0.5 }}>
+    <MainContainer>
+      <ContentContainer>
+        <Typography 
+          variant="h4" 
+          gutterBottom 
+          sx={{ 
+            color: '#005eb8', 
+            fontWeight: 'bold',
+            textAlign: 'center',
+            marginBottom: '30px'
+          }}
+        >
+          GeNotes Genomic Guidelines Assistant
+        </Typography>
+        
+        <ChatContainer elevation={3}>
+          <MessagesContainer>
+            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+              {messages.map((message) => (
+                <React.Fragment key={message.id}>
                   <MessageBubble isUser={message.role === 'user'}>
-                    <ListItemText
-                      primary={message.text}
-                      primaryTypographyProps={{
-                        color: message.role === 'user' ? 'inherit' : 'text.primary',
+                    <Typography 
+                      sx={{ 
+                        whiteSpace: 'pre-line',
+                        lineHeight: 1.5,
+                        fontSize: '14px'
                       }}
-                    />
+                    >
+                      {message.text}
+                    </Typography>
                     {message.sources && message.sources.length > 0 && (
-                      <Box sx={{ mt: 1, fontSize: '0.75rem' }}>
-                        <Divider sx={{ my: 1 }} />
-                        <Typography variant="caption" color="text.secondary">
-                          Sources:
+                      <Box sx={{ mt: 2, pt: 1, borderTop: '1px solid rgba(255,255,255,0.3)' }}>
+                        <Typography variant="caption" sx={{ fontSize: '11px', opacity: 0.8 }}>
+                          Source: {message.sources[0].title}
                         </Typography>
-                        {message.sources.map((source, idx) => (
-                          <Typography key={idx} variant="caption" display="block">
-                            • {source.title}
-                          </Typography>
-                        ))}
                       </Box>
                     )}
                   </MessageBubble>
-                </ListItem>
-              </React.Fragment>
-            ))}
-            {isLoading && (
-              <ListItem sx={{ justifyContent: 'center' }}>
-                <CircularProgress size={24} />
-              </ListItem>
-            )}
-            <div ref={messagesEndRef} />
-          </List>
-        </MessagesContainer>
-        
-        <InputContainer>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="Ask me anything about genomic guidelines..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            disabled={isLoading}
-            multiline
-            maxRows={4}
-            sx={{ mr: 1 }}
-          />
-          <IconButton
-            color="primary"
-            onClick={handleSendMessage}
-            disabled={!input.trim() || isLoading}
-            sx={{ alignSelf: 'flex-end' }}
-          >
-            <SendIcon />
-          </IconButton>
-        </InputContainer>
-      </ChatContainer>
-    </Box>
+                </React.Fragment>
+              ))}
+              {isLoading && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+                  <CircularProgress size={24} />
+                </Box>
+              )}
+              <div ref={messagesEndRef} />
+            </Box>
+          </MessagesContainer>
+          
+          <InputContainer>
+            <TextField
+              fullWidth
+              variant="outlined"
+              placeholder="Type your question about genomic guidelines..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              disabled={isLoading}
+              multiline
+              maxRows={4}
+              size="small"
+              sx={{ 
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: '20px',
+                  backgroundColor: '#f9f9f9',
+                }
+              }}
+            />
+            <SendButton
+              onClick={handleSendMessage}
+              disabled={!input.trim() || isLoading}
+              variant="contained"
+            >
+              Send
+            </SendButton>
+          </InputContainer>
+        </ChatContainer>
+      </ContentContainer>
+    </MainContainer>
   );
 };
 

@@ -28,6 +28,12 @@ RUN pip install --upgrade pip && \
 # Final stage
 FROM python:3.11.9-slim-bookworm
 
+# Install wget and curl for health checks and model downloads
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -68,7 +74,7 @@ USER ${APP_USER}
 ENV PATH="/home/${APP_USER}/.local/bin:${PATH}"
 
 # Copy application code
-COPY --chown=${APP_USER}:${APP_GID} simple_streamlitt_app/ ${APP_HOME}/
+COPY --chown=${APP_USER}:${APP_GID} backend/ ${APP_HOME}/
 
 # Create necessary directories and set permissions
 RUN mkdir -p ${APP_HOME}/data \
