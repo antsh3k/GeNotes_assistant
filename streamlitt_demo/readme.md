@@ -21,6 +21,8 @@ These are configured in your .env file. Refer to .env.example for the required e
 
 ℹ️ A list of data sources to be scraped can be found in requests.txt. These are all from Genotes but can be scraped from any website.
 
+Also dont forget to create a .env file based on .env.example
+
 ### 2. Create and Activate a Virtual Environment
 
 ```bash
