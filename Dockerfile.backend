@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy requirements first to leverage Docker cache
-COPY requirements.txt .
+COPY backend/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
@@ -28,10 +28,14 @@ RUN pip install --upgrade pip && \
 # Final stage
 FROM python:3.11.9-slim-bookworm
 
-# Install wget and curl for health checks and model downloads
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
+    libpq5 \
+    libmagic1 \
+    tesseract-ocr \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
@@ -52,14 +56,6 @@ RUN groupadd -g "${APP_GID}" "${APP_USER}" \
     && mkdir -p "${APP_HOME}" \
     && chown -R "${APP_USER}:${APP_GID}" "${APP_HOME}"
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    libmagic1 \
-    tesseract-ocr \
-    poppler-utils \
-    && rm -rf /var/lib/apt/lists/*
-
 # Set working directory and switch to non-root user
 WORKDIR ${APP_HOME}
 
@@ -70,15 +66,16 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Switch to non-root user
 USER ${APP_USER}
 
-# Ensure the local bin directory is in PATH
-ENV PATH="/home/${APP_USER}/.local/bin:${PATH}"
-
 # Copy application code
 COPY --chown=${APP_USER}:${APP_GID} backend/ ${APP_HOME}/
 
-# Create necessary directories and set permissions
-RUN mkdir -p ${APP_HOME}/data \
-    && chown -R ${APP_USER}:${APP_GID} ${APP_HOME}/data
+# Create application directory if it doesn't exist
+RUN mkdir -p ${APP_HOME} \
+    && chown -R ${APP_USER}:${APP_GID} ${APP_HOME}
+
+# Install requirements
+COPY --chown=${APP_USER}:${APP_GID} backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
@@ -88,4 +85,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 EXPOSE 8000
 
 # Command to run the application
-CMD ["uvicorn", "3_chatbot:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

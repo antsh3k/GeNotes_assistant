@@ -1,15 +1,17 @@
 import os
 import json
 import logging
-from typing import List, Optional, Dict, Any, Union
+import glob
+import requests
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Form, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, Field
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing_extensions import Annotated
+from bs4 import BeautifulSoup
 
 # LangChain imports
 from langchain.agents import AgentExecutor
@@ -20,7 +22,8 @@ from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
 from langchain.agents import create_tool_calling_agent
 from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import tool
-from langchain.schema.document import Document
+
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -79,46 +82,49 @@ llm = init_chat_model(
     temperature=0
 )
 
+# Define the tools available to the agent
+tools = [retrieve]
+tool_names = ", ".join([t.name for t in tools])
+
 # Define the prompt template with all required variables
-prompt_template = """
-You are a helpful assistant. You will be provided with a query and a chat history.
-Your task is to retrieve relevant information from the vector store and provide response.
-For this you use the tool 'retrieve' to get the relevant information.
+prompt = PromptTemplate.from_template(
+    """You are a helpful assistant that helps answer questions about genomic guidelines.
+    You have access to a knowledge base of genomic guidelines and resources.
+    Use the following pieces of context to answer the question at the end.
+    If you don't know the answer, just say that you don't know, don't try to make up an answer.
 
-Query: {input}
+    You have access to the following tools:
+    {tools}
 
-Chat History:
-{chat_history}
+    To use a tool, please use the following format:
+    ```
+    Thought: Do I need to use a tool? Yes
+    Action: the action to take, should be one of [{tool_names}]
+    Action Input: the input to the action
+    Observation: the result of the action
+    ```
 
-You can use the following tools:
+    When you have a response to say to the Human, or if you don't need to use a tool, you MUST use the format:
+    ```
+    Thought: Do I need to use a tool? No
+    Final Answer: [your response here]
+    ```
 
-{tools}
+    Context:
+    {context}
 
-Use the following format:
+    Chat History:
+    {chat_history}
 
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
+    Question: {input}
 
-Begin!
-
-Question: {input}
-Thought:{agent_scratchpad}
-For every piece of information you provide, also provide the source.
-
-Return text as follows:
-
-<Answer to the question>
-
-Source: source_url
-"""
-
-prompt = PromptTemplate.from_template(prompt_template)
+    Begin!
+    Thought:{agent_scratchpad}
+    """
+).partial(
+    tools="\n".join([f"{tool.name}: {tool.description}" for tool in tools]),
+    tool_names=tool_names
+)
 
 # Define Pydantic models for request/response
 class Message(BaseModel):
@@ -159,11 +165,15 @@ class CollectionInfo(BaseModel):
 
 # Define the retrieve tool
 @tool
-def retrieve(query: str) -> str:
-    """Retrieve information related to a query from the vector store."""
+def retrieve(query: str):
+    """Retrieve information related to a query."""
     try:
-        docs = vector_store.similarity_search(query, k=3)
-        return "\n\n".join([doc.page_content for doc in docs])
+        logger.info(f"Retrieving documents for query: {query}")
+        retrieved_docs = vector_store.similarity_search(query, k=2)
+        serialized = ""
+        for doc in retrieved_docs:
+            serialized += f"Source: {doc.metadata['source']}\nContent: {doc.page_content}\n\n"
+        return serialized
     except Exception as e:
         logger.error(f"Error retrieving documents: {str(e)}")
         return "Error retrieving information. Please try again later."
@@ -171,8 +181,35 @@ def retrieve(query: str) -> str:
 # Initialize tools and agent
 tools = [retrieve]
 
-# Create the agent with proper configuration
-from langchain.agents import AgentExecutor, create_openai_tools_agent
+# Define the prompt template
+from langchain_core.prompts import PromptTemplate
+
+prompt = PromptTemplate.from_template("""                                
+You are a helpful assistant. You will be provided with a query and a chat history.
+Your task is to retrieve relevant information from the vector store and provide response.
+For this you use the tool 'retrieve' to get the relevant information.
+                                      
+The query is as follows:                    
+{input}
+
+The chat history is as follows:
+{chat_history}
+
+Please provide a concise and informative response based on the retrieved information.
+If you don't know the answer, say "I don't know" (and don't provide a source).
+                                      
+You can use the scratchpad to store any intermediate results or notes.
+The scratchpad is as follows:
+{agent_scratchpad}
+
+For every piece of information you provide, also provide the source.
+
+Return text as follows:
+
+<Answer to the question>
+
+Source: source_url
+""")
 
 # Create the agent with the chat model and tools
 agent = create_tool_calling_agent(
@@ -181,25 +218,15 @@ agent = create_tool_calling_agent(
     prompt=prompt
 )
 
-# Initialize the agent executor with consistent settings
+# Initialize the agent executor
 agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-    handle_parsing_errors=True,
-    max_iterations=10,  # Prevent infinite loops
-    early_stopping_method="generate"  # Stop when the agent generates a final answer
-)
-
-# Initialize the agent executor with consistent settings
-agent_executor = AgentExecutor.from_agent_and_tools(
     agent=agent,
     tools=tools,
     verbose=True,
     handle_parsing_errors=True,
     max_iterations=5,
     early_stopping_method="generate",
-    return_intermediate_steps=True  # To get access to tool usage details
+    return_intermediate_steps=True
 )
 
 # Helper functions
@@ -259,7 +286,7 @@ async def generate_response(query: str, history: List[Message] = None) -> Dict[s
             "sources": sources,
             "metadata": {
                 "model": os.getenv("CHAT_MODEL", "llama3"),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
                 "tool_calls": len(sources) > 0
             }
         }
@@ -297,27 +324,111 @@ async def chat(chat_request: ChatRequest):
             detail="Error processing your request"
         )
 
+def fetch_article(url: str):
+    """Fetch and parse an article from a given URL."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        
+        # Extract title - try to find the main heading
+        title = soup.find("h1")
+        if not title:
+            title = soup.title.string if soup.title else "Untitled Document"
+        else:
+            title = title.text.strip()
+        
+        # Extract main content
+        article = soup.find("article") or soup.find("main") or soup.find("div", class_=lambda x: x and "content" in x.lower())
+        
+        if article:
+            # Remove script and style elements
+            for script in article(["script", "style", "nav", "footer", "header", "aside"]):
+                script.decompose()
+            
+            # Get text with proper spacing
+            text = "\n".join(p.get_text().strip() for p in article.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"]))
+        else:
+            # Fallback to body text if no article/main/content div found
+            text = soup.get_text()
+        
+        return {
+            "url": url,
+            "title": title,
+            "content": text.strip(),
+            "status": "success"
+        }
+    except requests.RequestException as e:
+        logger.error(f"Error fetching {url}: {str(e)}")
+        return {
+            "url": url,
+            "title": "Error",
+            "content": f"Error fetching content: {str(e)}",
+            "status": "error"
+        }
+
 @app.post("/api/scrape")
 async def scrape_website(request: ScrapeRequest):
-    """Scrape and process a website URL."""
-    try:
-        # In a real implementation, you would:
-        # 1. Scrape the website
-        # 2. Process the content
-        # 3. Add to vector store
-        # 4. Return success/failure
+    """
+    Scrape and process a website URL.
+    
+    Args:
+        request: ScrapeRequest containing the URL to scrape
         
-        # For now, just return a success message
+    Returns:
+        Dictionary with scraping results including status and content
+    """
+    try:
+        if not request.url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="URL is required"
+            )
+        
+        # Check if URL is valid
+        if not request.url.startswith(('http://', 'https://')):
+            request.url = 'https://' + request.url
+        
+        # Fetch and process the article
+        result = fetch_article(request.url)
+        
+        if result["status"] == "error":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result["content"]
+            )
+        
+        # Save the scraped content to the dataset directory
+        dataset_dir = Path("data/datasets")
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate a filename from the URL
+        filename = "".join(c if c.isalnum() else "_" for c in request.url)
+        filename = f"scraped_{filename[:50]}.txt"
+        filepath = dataset_dir / filename
+        
+        # Save the content
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2)
+        
         return {
             "status": "success",
             "message": f"Successfully scraped {request.url}",
+            "title": result["title"],
+            "content_length": len(result["content"]),
+            "saved_path": str(filepath),
             "documents_processed": 1
         }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error scraping website: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error scraping website"
+            detail=f"Error scraping website: {str(e)}"
         )
 
 @app.post("/api/upload")
@@ -444,43 +555,67 @@ async def chat_endpoint(chat_request: ChatSessionRequest):
         ChatSessionResponse containing the assistant's response
     """
     try:
+        logger.info(f"Received chat request: {chat_request}")
+        
         # Get or create session
         session_id = chat_request.session_id or str(uuid.uuid4())
         if session_id not in sessions:
-            sessions[session_id] = chat_history.copy()
+            sessions[session_id] = [
+                AIMessage("Hello! I'm the GeNotes Assistant. I can help you find and understand genomic clinical guidelines.")
+            ]
         
         # Add user message to session
         user_message = HumanMessage(content=chat_request.message)
         sessions[session_id].append(user_message)
         
-        # Generate response with consistent input format
-        agent_input = {
-            "input": chat_request.message,
-            "chat_history": sessions[session_id][:-1]  # All messages except the current one
-        }
-        result = agent_executor.invoke(agent_input)
+        # Format chat history for the agent
+        chat_history = sessions[session_id][:-1]  # All messages except the current one
         
-        ai_message = result["output"]
-        assistant_message = AIMessage(content=ai_message)
-        sessions[session_id].append(assistant_message)
+        logger.info(f"Generating response for session {session_id}")
         
-        # Extract sources if available
-        sources = []
-        if hasattr(result, 'sources'):
-            sources = result.sources
-        
-        return ChatSessionResponse(
-            message=ai_message,
-            session_id=session_id,
-            timestamp=datetime.utcnow().isoformat(),
-            sources=sources
-        )
+        # Generate response using the agent
+        try:
+            # Format the input for the agent
+            agent_input = {
+                "input": chat_request.message,
+                "chat_history": chat_history  # Pass the chat history directly
+            }
+            
+            # Invoke the agent
+            result = agent_executor.invoke(agent_input)
+            
+            # Extract the response
+            response_text = result.get("output", "I'm sorry, I couldn't generate a response.")
+            
+            # Ensure response is a string
+            if not isinstance(response_text, str):
+                response_text = str(response_text)
+            
+            # Add AI response to session
+            ai_message = AIMessage(content=response_text)
+            sessions[session_id].append(ai_message)
+            
+            logger.info(f"Generated response for session {session_id}")
+            
+            return ChatSessionResponse(
+                message=response_text,
+                session_id=session_id,
+                timestamp=datetime.utcnow().isoformat(),
+                sources=[]  # Add source tracking if needed
+            )
+            
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error generating response: {str(e)}"
+            )
         
     except Exception as e:
-        logger.error(f"Error in chat endpoint: {str(e)}")
+        logger.error(f"Error in chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing your request: {str(e)}"
+            detail=f"Error processing your request"
         )
 
 @app.websocket("/ws/chat")
@@ -526,7 +661,16 @@ async def websocket_chat(websocket: WebSocket):
                     "input": message["message"],
                     "chat_history": sessions[session_id][:-1]  # All messages except the current one
                 }
-                result = agent_executor.invoke(agent_input)
+                prompt_template = """You are a helpful AI assistant that helps answer questions about genomic guidelines.
+You have access to a knowledge base of genomic guidelines and resources.
+Use the following pieces of context to answer the question at the end.
+If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+{context}
+
+Question: {question}
+Helpful Answer:"""
+                result = agent_executor.invoke(agent_input, prompt_template=prompt_template)
                 
                 ai_message = result["output"]
                 assistant_message = AIMessage(content=ai_message)
