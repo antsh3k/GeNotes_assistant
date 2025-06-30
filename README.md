@@ -19,7 +19,7 @@ GeNotes aims to improve the accessibility and usability of genomic clinical guid
 
 ## Demo
 
-[Live Demo](ui_prototype.html)
+[Live Demo](https://antsh3k.github.io/GeNotes_assistant/ui_prototype.html)
 
 ## Features
 
